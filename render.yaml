@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: movie-tv-tracking-api
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: CORS_ORIGIN
+        value: "*"
+      # Add your TMDB_API_KEY in the Render dashboard
+    scaling:
+      minInstances: 1
+      maxInstances: 1

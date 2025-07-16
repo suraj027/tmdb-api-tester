@@ -1,0 +1,40 @@
+{
+  "name": "movie-tv-tracking-app",
+  "version": "1.0.0",
+  "description": "A Node.js API service that serves as a proxy for TMDB API with organized content categorization",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "keywords": [
+    "movie",
+    "tv",
+    "tmdb",
+    "api",
+    "proxy"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^8.0.0",
+    "express-validator": "^7.2.1",
+    "helmet": "^8.1.0",
+    "validator": "^13.15.15",
+    "xss": "^1.0.15"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.1",
+    "supertest": "^6.3.3"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
