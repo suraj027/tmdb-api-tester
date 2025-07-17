@@ -20,6 +20,12 @@ class CategoryService {
   async getTrendingMovies(page = 1) {
     try {
       const response = await this.tmdbService.getTrending('movie', 'day');
+      
+      // Enrich with taglines
+      if (response.results) {
+        response.results = await this.tmdbService.enrichWithTaglines(response.results);
+      }
+      
       return {
         success: true,
         data: response,
@@ -39,6 +45,12 @@ class CategoryService {
   async getHotTVShows(page = 1) {
     try {
       const response = await this.tmdbService.getTrending('tv', 'day');
+      
+      // Enrich with taglines
+      if (response.results) {
+        response.results = await this.tmdbService.enrichWithTaglines(response.results);
+      }
+      
       return {
         success: true,
         data: response,
@@ -58,6 +70,12 @@ class CategoryService {
   async getAnticipatedMovies(page = 1) {
     try {
       const response = await this.tmdbService.getUpcoming(page);
+      
+      // Enrich with taglines
+      if (response.results) {
+        response.results = await this.tmdbService.enrichWithTaglines(response.results);
+      }
+      
       return {
         success: true,
         data: response,
@@ -84,6 +102,12 @@ class CategoryService {
       };
       
       const response = await this.tmdbService.discoverMovies(params);
+      
+      // Enrich with taglines
+      if (response.results) {
+        response.results = await this.tmdbService.enrichWithTaglines(response.results);
+      }
+      
       return {
         success: true,
         data: response,
@@ -116,6 +140,11 @@ class CategoryService {
         response = await this.tmdbService.discoverTV(params);
       } else {
         response = await this.tmdbService.discoverMovies(params);
+      }
+      
+      // Enrich with taglines
+      if (response.results) {
+        response.results = await this.tmdbService.enrichWithTaglines(response.results);
       }
 
       return {
@@ -152,6 +181,11 @@ class CategoryService {
       } else {
         response = await this.tmdbService.discoverMovies(params);
       }
+      
+      // Enrich with taglines
+      if (response.results) {
+        response.results = await this.tmdbService.enrichWithTaglines(response.results);
+      }
 
       return {
         success: true,
@@ -180,6 +214,11 @@ class CategoryService {
     try {
       const params = { ...convertToTMDBParams(mapping), page };
       const response = await this.tmdbService.discoverMovies(params);
+      
+      // Enrich with taglines
+      if (response.results) {
+        response.results = await this.tmdbService.enrichWithTaglines(response.results);
+      }
 
       return {
         success: true,
@@ -208,6 +247,11 @@ class CategoryService {
     try {
       const params = { ...convertToTMDBParams(mapping), page };
       const response = await this.tmdbService.discoverTV(params);
+      
+      // Enrich with taglines
+      if (response.results) {
+        response.results = await this.tmdbService.enrichWithTaglines(response.results);
+      }
 
       return {
         success: true,
@@ -243,6 +287,11 @@ class CategoryService {
       } else {
         response = await this.tmdbService.discoverMovies(params);
       }
+      
+      // Enrich with taglines
+      if (response.results) {
+        response.results = await this.tmdbService.enrichWithTaglines(response.results);
+      }
 
       return {
         success: true,
@@ -264,6 +313,11 @@ class CategoryService {
   async getUpcomingMovies(page = 1) {
     try {
       const response = await this.tmdbService.getUpcoming(page);
+      
+      // Enrich with taglines
+      if (response.results) {
+        response.results = await this.tmdbService.enrichWithTaglines(response.results);
+      }
       
       // Transform data with proper date formatting
       const transformedData = {
@@ -306,6 +360,11 @@ class CategoryService {
       };
 
       const response = await this.tmdbService.discoverTV(params);
+      
+      // Enrich with taglines
+      if (response.results) {
+        response.results = await this.tmdbService.enrichWithTaglines(response.results);
+      }
       
       // Transform data with proper date formatting
       const transformedData = {

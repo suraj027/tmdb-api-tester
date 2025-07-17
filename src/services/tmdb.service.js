@@ -145,6 +145,65 @@ class TMDBService {
   }
 
   /**
+   * Enrich results with taglines by fetching detailed information
+   * @param {Array} results - Array of movie/TV show results
+   * @param {number} maxConcurrent - Maximum concurrent requests (default: 5)
+   * @returns {Promise<Array>} Results enriched with taglines
+   */
+  async enrichWithTaglines(results, maxConcurrent = 5) {
+    if (!results || !Array.isArray(results) || results.length === 0) {
+      return results;
+    }
+
+    // Process results in batches to avoid rate limiting
+    const enrichedResults = [];
+    
+    for (let i = 0; i < results.length; i += maxConcurrent) {
+      const batch = results.slice(i, i + maxConcurrent);
+      
+      const batchPromises = batch.map(async (item) => {
+        try {
+          // Skip if not a movie or TV show
+          if (!item.id || (item.media_type && !['movie', 'tv'].includes(item.media_type))) {
+            return item;
+          }
+
+          // Determine media type
+          const mediaType = item.media_type || (item.title ? 'movie' : 'tv');
+          
+          // Fetch detailed information
+          let detailedInfo;
+          if (mediaType === 'movie') {
+            detailedInfo = await this.getMovie(item.id);
+          } else if (mediaType === 'tv') {
+            detailedInfo = await this.getTVShow(item.id);
+          } else {
+            return item;
+          }
+
+          // Add tagline to the original item
+          return {
+            ...item,
+            tagline: detailedInfo.tagline || ''
+          };
+        } catch (error) {
+          // If individual request fails, return original item without tagline
+          console.warn(`Failed to fetch tagline for ${item.media_type || 'unknown'} ID ${item.id}:`, error.message);
+          return {
+            ...item,
+            tagline: ''
+          };
+        }
+      });
+
+      const batchResults = await Promise.all(batchPromises);
+      enrichedResults.push(...batchResults);
+    }
+
+    return enrichedResults;
+  }
+
+  /**
    * Generate full image URL from TMDB image path
    */
   getImageURL(imagePath, size = 'original') {
