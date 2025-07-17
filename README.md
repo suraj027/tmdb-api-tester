@@ -60,20 +60,3 @@ GET /api/genre/action?page=1&type=movie
 GET /api/mood/family-movie-night?page=1
 GET /api/awards/oscar-winners?page=1
 ```
-
-### Response Format
-
-#### Success Response
-```json
-{
-  "success": true,
-  "data": {
-    // Response data
-  },
-  "pagination": {
-    "page": 1,
-    "totalPages": 10,
-    "totalResults": 200
-  }
-}
-```
