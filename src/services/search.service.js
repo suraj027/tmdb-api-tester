@@ -30,6 +30,12 @@ class SearchService {
 
     try {
       const response = await this.tmdbService.searchMulti(query.trim(), page);
+      
+      // Enrich results with taglines if requested
+      if (options.includeTaglines !== false && response.results) {
+        response.results = await this.tmdbService.enrichWithTaglines(response.results);
+      }
+      
       return this.formatSearchResults(response, 'multi', options);
     } catch (error) {
       throw this.handleSearchError(error, 'multi-search');
@@ -54,6 +60,12 @@ class SearchService {
 
     try {
       const response = await this.tmdbService.searchMovies(query.trim(), page);
+      
+      // Enrich results with taglines if requested
+      if (options.includeTaglines !== false && response.results) {
+        response.results = await this.tmdbService.enrichWithTaglines(response.results);
+      }
+      
       return this.formatSearchResults(response, 'movie', options);
     } catch (error) {
       throw this.handleSearchError(error, 'movie-search');
@@ -78,6 +90,12 @@ class SearchService {
 
     try {
       const response = await this.tmdbService.searchTV(query.trim(), page);
+      
+      // Enrich results with taglines if requested
+      if (options.includeTaglines !== false && response.results) {
+        response.results = await this.tmdbService.enrichWithTaglines(response.results);
+      }
+      
       return this.formatSearchResults(response, 'tv', options);
     } catch (error) {
       throw this.handleSearchError(error, 'tv-search');
@@ -208,6 +226,7 @@ class SearchService {
       title: item.title || item.name,
       originalTitle: item.original_title || item.original_name,
       overview: item.overview,
+      tagline: item.tagline || '',
       posterPath: item.poster_path,
       posterUrl: item.poster_url,
       backdropPath: item.backdrop_path,
