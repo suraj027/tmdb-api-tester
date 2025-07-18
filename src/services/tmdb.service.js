@@ -352,6 +352,99 @@ class TMDBService {
   async getPersonMovies(id) {
     return this.makeRequest(`/person/${id}/movie_credits`);
   }
+
+  /**
+   * Get trending movies right now (combines daily and weekly trends)
+   * Returns movies that are trending today with fallback to weekly trends
+   */
+  async getTrendingMoviesNow(page = 1) {
+    try {
+      // Get daily trending first (most current)
+      const dailyTrending = await this.makeRequest('/trending/movie/day', { page });
+      
+      // If we have good daily results, return them
+      if (dailyTrending.results && dailyTrending.results.length >= 10) {
+        return {
+          ...dailyTrending,
+          trending_period: 'day',
+          description: 'Movies trending today'
+        };
+      }
+      
+      // Fallback to weekly if daily doesn't have enough results
+      const weeklyTrending = await this.makeRequest('/trending/movie/week', { page });
+      return {
+        ...weeklyTrending,
+        trending_period: 'week',
+        description: 'Movies trending this week'
+      };
+    } catch (error) {
+      // If daily fails, try weekly as fallback
+      const weeklyTrending = await this.makeRequest('/trending/movie/week', { page });
+      return {
+        ...weeklyTrending,
+        trending_period: 'week',
+        description: 'Movies trending this week'
+      };
+    }
+  }
+
+  /**
+   * Get hot TV shows right now (combines daily and weekly trends)
+   * Returns TV shows that are trending today with fallback to weekly trends
+   */
+  async getHotTVShowsNow(page = 1) {
+    try {
+      // Get daily trending first (most current)
+      const dailyTrending = await this.makeRequest('/trending/tv/day', { page });
+      
+      // If we have good daily results, return them
+      if (dailyTrending.results && dailyTrending.results.length >= 10) {
+        return {
+          ...dailyTrending,
+          trending_period: 'day',
+          description: 'TV shows trending today'
+        };
+      }
+      
+      // Fallback to weekly if daily doesn't have enough results
+      const weeklyTrending = await this.makeRequest('/trending/tv/week', { page });
+      return {
+        ...weeklyTrending,
+        trending_period: 'week',
+        description: 'TV shows trending this week'
+      };
+    } catch (error) {
+      // If daily fails, try weekly as fallback
+      const weeklyTrending = await this.makeRequest('/trending/tv/week', { page });
+      return {
+        ...weeklyTrending,
+        trending_period: 'week',
+        description: 'TV shows trending this week'
+      };
+    }
+  }
+
+  /**
+   * Get now playing movies (films currently in theaters)
+   */
+  async getNowPlayingMovies(page = 1) {
+    return this.makeRequest('/movie/now_playing', { page });
+  }
+
+  /**
+   * Get popular movies
+   */
+  async getPopularMovies(page = 1) {
+    return this.makeRequest('/movie/popular', { page });
+  }
+
+  /**
+   * Get popular TV shows
+   */
+  async getPopularTV(page = 1) {
+    return this.makeRequest('/tv/popular', { page });
+  }
 }
 
 module.exports = TMDBService;
