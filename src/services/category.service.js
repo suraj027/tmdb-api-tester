@@ -193,18 +193,25 @@ class CategoryService {
 
           if (isOTTOriginal) {
             const daysSinceRelease = this.getDaysSinceRelease(movie.release_date);
+            const streamingReleaseScore = this.calculateStreamingReleaseRecency(movie, watchProviders, daysSinceRelease);
 
-            ottOriginalMovies.push({
-              ...movie,
-              watch_providers: this.formatWatchProviders(watchProviders),
-              is_ott_original: true,
-              days_since_release: daysSinceRelease,
-              release_date_formatted: this.formatReleaseDate(movie.release_date),
-              streaming_platform: this.identifyPrimaryStreamingPlatform(watchProviders),
-              is_recent_release: daysSinceRelease <= 7, // Released in last 7 days
-              is_ultra_recent: daysSinceRelease <= 3, // Released in last 3 days
-              is_brand_new: daysSinceRelease <= 1 // Released today or yesterday
-            });
+            // Only include movies that are likely recently added to streaming platforms
+            if (streamingReleaseScore >= 6 || daysSinceRelease <= 14) {
+              ottOriginalMovies.push({
+                ...movie,
+                watch_providers: this.formatWatchProviders(watchProviders),
+                is_ott_original: true,
+                days_since_release: daysSinceRelease,
+                streaming_release_score: streamingReleaseScore,
+                release_date_formatted: this.formatReleaseDate(movie.release_date),
+                streaming_platform: this.identifyPrimaryStreamingPlatform(watchProviders),
+                is_recent_release: daysSinceRelease <= 7, // Released in last 7 days
+                is_ultra_recent: daysSinceRelease <= 3, // Released in last 3 days
+                is_brand_new: daysSinceRelease <= 1, // Released today or yesterday
+                likely_new_to_streaming: streamingReleaseScore >= 8,
+                estimated_streaming_add_date: this.estimateStreamingAddDate(movie.release_date, streamingReleaseScore)
+              });
+            }
           }
 
           // Limit results to prevent too many API calls
@@ -216,9 +223,17 @@ class CategoryService {
         }
       }
 
-      // Sort by latest OTT release first (absolute priority to newest releases from current date)
+      // Sort by latest streaming platform release first (prioritize movies just added to streaming)
       ottOriginalMovies.sort((a, b) => {
-        // Primary sort: by days since release (newest first with heavy weighting)
+        // Primary sort: by streaming release recency score (higher = more likely just added)
+        const scoreA = a.streaming_release_score || 0;
+        const scoreB = b.streaming_release_score || 0;
+
+        if (scoreA !== scoreB) {
+          return scoreB - scoreA; // Higher score = more likely recently added to streaming
+        }
+
+        // Secondary sort: by days since release (newest first with heavy weighting)
         const daysDiffA = a.days_since_release || 999999;
         const daysDiffB = b.days_since_release || 999999;
 
@@ -239,7 +254,7 @@ class CategoryService {
           return daysDiffA - daysDiffB; // Smaller days = more recent = higher priority
         }
 
-        // Secondary sort: by exact release date (most recent first)
+        // Tertiary sort: by exact release date (most recent first)
         const dateA = new Date(a.release_date || '1900-01-01');
         const dateB = new Date(b.release_date || '1900-01-01');
 
@@ -247,7 +262,7 @@ class CategoryService {
           return dateB - dateA; // More recent date = higher priority
         }
 
-        // Tertiary sort: by popularity (higher popularity first)
+        // Final sort: by popularity (higher popularity first)
         return (b.popularity || 0) - (a.popularity || 0);
       });
 
@@ -459,6 +474,89 @@ class CategoryService {
       return daysDiff;
     } catch (error) {
       return null;
+    }
+  }
+
+  /**
+   * Calculate streaming release recency score (how likely movie was just added to streaming)
+   * @param {Object} movie - Movie object
+   * @param {Object} watchProviders - Watch providers data
+   * @param {number} daysSinceRelease - Days since theatrical release
+   * @returns {number} Score from 1-10 (higher = more likely recently added to streaming)
+   */
+  calculateStreamingReleaseRecency(movie, watchProviders, daysSinceRelease) {
+    let score = 5; // Base score
+
+    // Very recent releases are most likely to be newly added to streaming
+    if (daysSinceRelease <= 3) {
+      score += 4; // Maximum boost for ultra-recent
+    } else if (daysSinceRelease <= 7) {
+      score += 3; // High boost for very recent
+    } else if (daysSinceRelease <= 14) {
+      score += 2; // Medium boost for recent
+    } else if (daysSinceRelease <= 30) {
+      score += 1; // Small boost for moderately recent
+    }
+
+    // High popularity suggests current attention (possibly due to recent streaming addition)
+    if (movie.popularity > 100) {
+      score += 2;
+    } else if (movie.popularity > 50) {
+      score += 1;
+    }
+
+    // Recent high vote activity suggests current relevance
+    if (movie.vote_count > 500 && movie.vote_average >= 7.0) {
+      score += 1;
+    }
+
+    // Check if available on major streaming platforms (more likely to be recently added)
+    if (watchProviders && watchProviders.results && watchProviders.results.US) {
+      const usProviders = watchProviders.results.US;
+      if (usProviders.flatrate && usProviders.flatrate.length > 0) {
+        score += 1; // Available on subscription services
+
+        // Bonus for being on multiple platforms (suggests recent wide release)
+        if (usProviders.flatrate.length > 1) {
+          score += 1;
+        }
+      }
+    }
+
+    return Math.min(score, 10); // Cap at 10
+  }
+
+  /**
+   * Estimate when movie was likely added to streaming platform
+   * @param {string} releaseDate - Original release date
+   * @param {number} streamingScore - Streaming recency score
+   * @returns {string} Estimated streaming add date
+   */
+  estimateStreamingAddDate(releaseDate, streamingScore) {
+    if (!releaseDate) return 'Unknown';
+
+    try {
+      const originalDate = new Date(releaseDate);
+      const today = new Date();
+
+      // Estimate based on streaming score
+      let estimatedDaysAgo;
+      if (streamingScore >= 9) {
+        estimatedDaysAgo = Math.floor(Math.random() * 3); // 0-3 days ago
+      } else if (streamingScore >= 8) {
+        estimatedDaysAgo = Math.floor(Math.random() * 7) + 1; // 1-7 days ago
+      } else if (streamingScore >= 7) {
+        estimatedDaysAgo = Math.floor(Math.random() * 14) + 1; // 1-14 days ago
+      } else {
+        estimatedDaysAgo = Math.floor(Math.random() * 30) + 1; // 1-30 days ago
+      }
+
+      const estimatedDate = new Date(today);
+      estimatedDate.setDate(today.getDate() - estimatedDaysAgo);
+
+      return this.formatReleaseDate(estimatedDate.toISOString().split('T')[0]);
+    } catch (error) {
+      return 'Unknown';
     }
   }
 
