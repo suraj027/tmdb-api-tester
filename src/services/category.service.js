@@ -126,15 +126,21 @@ class CategoryService {
     try {
       const ottOriginalMovies = [];
 
-      // Get recent movies released directly on streaming platforms
+      // Get movies released directly on streaming platforms (focus on very recent releases)
       const today = new Date();
+      const threeDaysAgo = new Date();
+      threeDaysAgo.setDate(today.getDate() - 3);
+
       const oneWeekAgo = new Date();
       oneWeekAgo.setDate(today.getDate() - 7);
 
-      const sixMonthsAgo = new Date();
-      sixMonthsAgo.setMonth(today.getMonth() - 6);
+      const twoWeeksAgo = new Date();
+      twoWeeksAgo.setDate(today.getDate() - 14);
 
-      // Search for OTT originals from ALL streaming platforms
+      const oneMonthAgo = new Date();
+      oneMonthAgo.setMonth(today.getMonth() - 1);
+
+      // Search for OTT originals from ALL streaming platforms with tiered date ranges
       const allOTTPlatforms = [
         'Netflix', 'Prime Video', 'Disney+', 'Apple TV+', 'HBO Max', 'Hulu',
         'Paramount+', 'Peacock', 'Showtime', 'Starz', 'Crunchyroll', 'Funimation',
@@ -142,17 +148,27 @@ class CategoryService {
         'Vudu', 'Crackle', 'Plex', 'Kanopy', 'Hoopla'
       ];
 
-      // Priority 1: Very recent releases (last week) from ALL platforms
-      const recentSearchPromises = allOTTPlatforms.map(platform =>
-        this.getOTTOriginalsBatch(platform, oneWeekAgo, today, 1)
+      // Priority 1: Ultra-recent releases (last 3 days) - highest priority
+      const ultraRecentPromises = allOTTPlatforms.map(platform =>
+        this.getOTTOriginalsBatch(platform, threeDaysAgo, today, 1)
       );
 
-      // Priority 2: Recent releases (last 6 months) from ALL platforms
-      const olderSearchPromises = allOTTPlatforms.map(platform =>
-        this.getOTTOriginalsBatch(platform, sixMonthsAgo, oneWeekAgo, 1)
+      // Priority 2: Very recent releases (3-7 days ago)
+      const veryRecentPromises = allOTTPlatforms.map(platform =>
+        this.getOTTOriginalsBatch(platform, oneWeekAgo, threeDaysAgo, 1)
       );
 
-      const searchPromises = [...recentSearchPromises, ...olderSearchPromises];
+      // Priority 3: Recent releases (1-2 weeks ago)
+      const recentPromises = allOTTPlatforms.map(platform =>
+        this.getOTTOriginalsBatch(platform, twoWeeksAgo, oneWeekAgo, 1)
+      );
+
+      // Priority 4: Moderately recent releases (2-4 weeks ago) - lower priority
+      const moderatePromises = allOTTPlatforms.map(platform =>
+        this.getOTTOriginalsBatch(platform, oneMonthAgo, twoWeeksAgo, 1)
+      );
+
+      const searchPromises = [...ultraRecentPromises, ...veryRecentPromises, ...recentPromises, ...moderatePromises];
 
       const batchResults = await Promise.allSettled(searchPromises);
 
@@ -185,7 +201,9 @@ class CategoryService {
               days_since_release: daysSinceRelease,
               release_date_formatted: this.formatReleaseDate(movie.release_date),
               streaming_platform: this.identifyPrimaryStreamingPlatform(watchProviders),
-              is_recent_release: daysSinceRelease <= 30 // Released in last 30 days
+              is_recent_release: daysSinceRelease <= 7, // Released in last 7 days
+              is_ultra_recent: daysSinceRelease <= 3, // Released in last 3 days
+              is_brand_new: daysSinceRelease <= 1 // Released today or yesterday
             });
           }
 
@@ -198,17 +216,30 @@ class CategoryService {
         }
       }
 
-      // Sort by latest OTT release first (most recent releases at the top)
+      // Sort by latest OTT release first (absolute priority to newest releases from current date)
       ottOriginalMovies.sort((a, b) => {
-        // Primary sort: by days since release (newest first)
+        // Primary sort: by days since release (newest first with heavy weighting)
         const daysDiffA = a.days_since_release || 999999;
         const daysDiffB = b.days_since_release || 999999;
 
+        // Give massive priority to releases within last 3 days (ultra-recent)
+        if (daysDiffA <= 3 && daysDiffB > 3) return -1;
+        if (daysDiffB <= 3 && daysDiffA > 3) return 1;
+
+        // Give high priority to releases within last 7 days
+        if (daysDiffA <= 7 && daysDiffB > 7) return -1;
+        if (daysDiffB <= 7 && daysDiffA > 7) return 1;
+
+        // Give medium priority to releases within last 14 days
+        if (daysDiffA <= 14 && daysDiffB > 14) return -1;
+        if (daysDiffB <= 14 && daysDiffA > 14) return 1;
+
+        // Within same urgency tier, sort by exact days
         if (daysDiffA !== daysDiffB) {
           return daysDiffA - daysDiffB; // Smaller days = more recent = higher priority
         }
 
-        // Secondary sort: by release date (most recent first)
+        // Secondary sort: by exact release date (most recent first)
         const dateA = new Date(a.release_date || '1900-01-01');
         const dateB = new Date(b.release_date || '1900-01-01');
 
