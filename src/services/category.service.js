@@ -118,83 +118,162 @@ class CategoryService {
   }
 
   /**
-   * Get films now streaming on OTT platforms
+   * Get films now streaming on OTT platforms (prioritizing recently added)
    * @param {number} page - Page number for pagination
    * @returns {Promise<Object>} Streaming movies data
    */
   async getStreamingNow(page = 1) {
     try {
-      // Get movies that are likely available for streaming
-      // Focus on movies that are older than 3 months (typical theater-to-streaming window)
-      // but not too old (within last 3 years to keep content fresh)
-      const today = new Date();
-      const threeMonthsAgo = new Date();
-      threeMonthsAgo.setMonth(today.getMonth() - 3);
+      // Get multiple batches to find recently added streaming content
+      const recentlyAddedMovies = [];
+      const olderStreamingMovies = [];
       
-      const threeYearsAgo = new Date();
-      threeYearsAgo.setFullYear(today.getFullYear() - 3);
+      // Batch 1: Very recent releases (3-6 months ago) - likely recently added to streaming
+      const recentBatch = await this.getStreamingMoviesBatch(3, 6, 1);
       
-      const params = {
-        sort_by: 'popularity.desc',
-        'release_date.lte': this.formatDateForAPI(threeMonthsAgo), // Released at least 3 months ago
-        'release_date.gte': this.formatDateForAPI(threeYearsAgo),  // Not older than 3 years
-        'vote_average.gte': 6.0,  // Good ratings
-        'vote_count.gte': 200,    // Sufficient votes
-        with_watch_monetization_types: 'flatrate|ads|rent|buy', // Available for streaming/rental
-        page
-      };
+      // Batch 2: Moderately recent (6-12 months ago) - some recently added
+      const moderateBatch = await this.getStreamingMoviesBatch(6, 12, 1);
       
-      const response = await this.tmdbService.discoverMovies(params);
+      // Batch 3: Older movies (1-3 years) - established streaming content
+      const olderBatch = await this.getStreamingMoviesBatch(12, 36, 1);
       
-      if (response.results) {
-        // Filter and enhance results with streaming information
-        const enhancedResults = [];
-        
-        for (const movie of response.results) {
-          try {
-            // Get watch providers for each movie
-            const watchProviders = await this.tmdbService.getMovieWatchProviders(movie.id);
+      // Combine and categorize results
+      const allMovies = [...recentBatch, ...moderateBatch, ...olderBatch];
+      
+      // Process each movie to get streaming info and categorize
+      for (const movie of allMovies) {
+        try {
+          const watchProviders = await this.tmdbService.getMovieWatchProviders(movie.id);
+          const hasStreamingOptions = this.hasStreamingAvailability(watchProviders);
+          
+          if (hasStreamingOptions) {
+            const monthsSinceRelease = this.getMonthsSinceRelease(movie.release_date);
+            const streamingScore = this.calculateStreamingRecencyScore(movie, monthsSinceRelease);
             
-            // Check if movie has streaming options (not just buy/rent)
-            const hasStreamingOptions = this.hasStreamingAvailability(watchProviders);
-            
-            if (hasStreamingOptions) {
-              enhancedResults.push({
-                ...movie,
-                watch_providers: this.formatWatchProviders(watchProviders),
-                streaming_available: true,
-                months_since_release: this.getMonthsSinceRelease(movie.release_date)
-              });
-            }
-            
-            // Limit to prevent too many API calls
-            if (enhancedResults.length >= 15) break;
-            
-          } catch (error) {
-            // If watch provider fetch fails, include movie anyway
-            enhancedResults.push({
+            const enhancedMovie = {
               ...movie,
+              watch_providers: this.formatWatchProviders(watchProviders),
               streaming_available: true,
-              months_since_release: this.getMonthsSinceRelease(movie.release_date)
-            });
+              months_since_release: monthsSinceRelease,
+              streaming_recency_score: streamingScore,
+              likely_recently_added: streamingScore > 7
+            };
+            
+            // Categorize based on recency score
+            if (streamingScore > 7) {
+              recentlyAddedMovies.push(enhancedMovie);
+            } else {
+              olderStreamingMovies.push(enhancedMovie);
+            }
           }
+          
+          // Limit total results
+          if (recentlyAddedMovies.length + olderStreamingMovies.length >= 20) break;
+          
+        } catch (error) {
+          // Continue with next movie if this one fails
+          continue;
         }
-        
-        // Enrich with taglines
-        response.results = await this.tmdbService.enrichWithTaglines(enhancedResults);
-        response.total_results = enhancedResults.length;
       }
+      
+      // Sort recently added by recency score (highest first)
+      recentlyAddedMovies.sort((a, b) => b.streaming_recency_score - a.streaming_recency_score);
+      
+      // Sort older movies by popularity
+      olderStreamingMovies.sort((a, b) => b.popularity - a.popularity);
+      
+      // Combine with recently added first
+      const finalResults = [...recentlyAddedMovies, ...olderStreamingMovies];
+      
+      // Enrich with taglines
+      const enrichedResults = await this.tmdbService.enrichWithTaglines(finalResults);
       
       return {
         success: true,
-        data: response,
+        data: {
+          results: enrichedResults,
+          total_results: enrichedResults.length,
+          recently_added_count: recentlyAddedMovies.length,
+          page: 1 // Always return page 1 for this curated list
+        },
         category: 'streaming-now',
-        description: 'Movies available for streaming on OTT platforms',
+        description: 'Movies recently added to streaming platforms and popular streaming content',
         page
       };
     } catch (error) {
       throw this.createCategoryError('Failed to fetch streaming movies', error);
     }
+  }
+
+  /**
+   * Get a batch of movies for streaming analysis
+   * @param {number} minMonthsAgo - Minimum months since release
+   * @param {number} maxMonthsAgo - Maximum months since release
+   * @param {number} page - Page number
+   * @returns {Promise<Array>} Array of movies
+   */
+  async getStreamingMoviesBatch(minMonthsAgo, maxMonthsAgo, page = 1) {
+    const today = new Date();
+    const minDate = new Date();
+    minDate.setMonth(today.getMonth() - maxMonthsAgo);
+    
+    const maxDate = new Date();
+    maxDate.setMonth(today.getMonth() - minMonthsAgo);
+    
+    const params = {
+      sort_by: 'popularity.desc',
+      'release_date.gte': this.formatDateForAPI(minDate),
+      'release_date.lte': this.formatDateForAPI(maxDate),
+      'vote_average.gte': 5.5,
+      'vote_count.gte': 100,
+      with_watch_monetization_types: 'flatrate|ads',
+      page
+    };
+    
+    try {
+      const response = await this.tmdbService.discoverMovies(params);
+      return response.results || [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  /**
+   * Calculate streaming recency score (higher = more likely recently added)
+   * @param {Object} movie - Movie object
+   * @param {number} monthsSinceRelease - Months since theatrical release
+   * @returns {number} Score from 1-10
+   */
+  calculateStreamingRecencyScore(movie, monthsSinceRelease) {
+    let score = 5; // Base score
+    
+    // Recent releases are more likely to be recently added to streaming
+    if (monthsSinceRelease <= 6) {
+      score += 3;
+    } else if (monthsSinceRelease <= 12) {
+      score += 2;
+    } else if (monthsSinceRelease <= 24) {
+      score += 1;
+    }
+    
+    // High popularity suggests recent addition or trending
+    if (movie.popularity > 50) {
+      score += 2;
+    } else if (movie.popularity > 25) {
+      score += 1;
+    }
+    
+    // High vote count suggests recent attention
+    if (movie.vote_count > 1000) {
+      score += 1;
+    }
+    
+    // Recent high ratings suggest current relevance
+    if (movie.vote_average >= 7.5) {
+      score += 1;
+    }
+    
+    return Math.min(score, 10); // Cap at 10
   }
 
   /**
