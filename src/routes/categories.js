@@ -1,13 +1,13 @@
 const express = require('express');
 const CategoryService = require('../services/category.service');
 const TMDBService = require('../services/tmdb.service');
-const { 
-  validatePageQuery, 
-  validateCategoryParam, 
-  validateStudioParam, 
-  validateNetworkParam, 
-  validateGenreParam, 
-  validateAwardTypeParam 
+const {
+  validatePageQuery,
+  validateCategoryParam,
+  validateStudioParam,
+  validateNetworkParam,
+  validateGenreParam,
+  validateAwardTypeParam
 } = require('../middleware/validation');
 
 const router = express.Router();
@@ -131,6 +131,19 @@ router.get('/trending/tv', validatePageQuery, async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const result = await categoryService.getHotTVShows(page);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Get anticipated movies (upcoming movies)
+ */
+router.get('/upcoming/movies', validatePageQuery, async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const result = await categoryService.getAnticipatedMovies(page);
     res.json(result);
   } catch (error) {
     next(error);
