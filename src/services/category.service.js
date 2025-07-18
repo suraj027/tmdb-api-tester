@@ -118,30 +118,78 @@ class CategoryService {
   }
 
   /**
-   * Get films now streaming (popular movies with high ratings)
+   * Get films now streaming on OTT platforms
    * @param {number} page - Page number for pagination
    * @returns {Promise<Object>} Streaming movies data
    */
   async getStreamingNow(page = 1) {
     try {
+      // Get movies that are likely available for streaming
+      // Focus on movies that are older than 3 months (typical theater-to-streaming window)
+      // but not too old (within last 3 years to keep content fresh)
+      const today = new Date();
+      const threeMonthsAgo = new Date();
+      threeMonthsAgo.setMonth(today.getMonth() - 3);
+      
+      const threeYearsAgo = new Date();
+      threeYearsAgo.setFullYear(today.getFullYear() - 3);
+      
       const params = {
         sort_by: 'popularity.desc',
-        'vote_average.gte': 6.0,
-        'vote_count.gte': 100,
+        'release_date.lte': this.formatDateForAPI(threeMonthsAgo), // Released at least 3 months ago
+        'release_date.gte': this.formatDateForAPI(threeYearsAgo),  // Not older than 3 years
+        'vote_average.gte': 6.0,  // Good ratings
+        'vote_count.gte': 200,    // Sufficient votes
+        with_watch_monetization_types: 'flatrate|ads|rent|buy', // Available for streaming/rental
         page
       };
       
       const response = await this.tmdbService.discoverMovies(params);
       
-      // Enrich with taglines
       if (response.results) {
-        response.results = await this.tmdbService.enrichWithTaglines(response.results);
+        // Filter and enhance results with streaming information
+        const enhancedResults = [];
+        
+        for (const movie of response.results) {
+          try {
+            // Get watch providers for each movie
+            const watchProviders = await this.tmdbService.getMovieWatchProviders(movie.id);
+            
+            // Check if movie has streaming options (not just buy/rent)
+            const hasStreamingOptions = this.hasStreamingAvailability(watchProviders);
+            
+            if (hasStreamingOptions) {
+              enhancedResults.push({
+                ...movie,
+                watch_providers: this.formatWatchProviders(watchProviders),
+                streaming_available: true,
+                months_since_release: this.getMonthsSinceRelease(movie.release_date)
+              });
+            }
+            
+            // Limit to prevent too many API calls
+            if (enhancedResults.length >= 15) break;
+            
+          } catch (error) {
+            // If watch provider fetch fails, include movie anyway
+            enhancedResults.push({
+              ...movie,
+              streaming_available: true,
+              months_since_release: this.getMonthsSinceRelease(movie.release_date)
+            });
+          }
+        }
+        
+        // Enrich with taglines
+        response.results = await this.tmdbService.enrichWithTaglines(enhancedResults);
+        response.total_results = enhancedResults.length;
       }
       
       return {
         success: true,
         data: response,
         category: 'streaming-now',
+        description: 'Movies available for streaming on OTT platforms',
         page
       };
     } catch (error) {
@@ -532,6 +580,62 @@ class CategoryService {
     } catch (error) {
       return null;
     }
+  }
+
+  /**
+   * Calculate months since release
+   * @param {string} dateString - ISO date string
+   * @returns {number} Number of months since release
+   */
+  getMonthsSinceRelease(dateString) {
+    if (!dateString) return null;
+    
+    try {
+      const releaseDate = new Date(dateString);
+      const today = new Date();
+      
+      const yearDiff = today.getFullYear() - releaseDate.getFullYear();
+      const monthDiff = today.getMonth() - releaseDate.getMonth();
+      
+      return yearDiff * 12 + monthDiff;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * Check if movie has streaming availability (not just buy/rent)
+   * @param {Object} watchProviders - Watch providers data from TMDB
+   * @returns {boolean} True if streaming options are available
+   */
+  hasStreamingAvailability(watchProviders) {
+    if (!watchProviders || !watchProviders.results) return false;
+    
+    // Check US market (you can modify this for other regions)
+    const usProviders = watchProviders.results.US;
+    if (!usProviders) return false;
+    
+    // Check for flatrate (subscription) or ads (free with ads) options
+    return !!(usProviders.flatrate || usProviders.ads);
+  }
+
+  /**
+   * Format watch providers for display
+   * @param {Object} watchProviders - Watch providers data from TMDB
+   * @returns {Object} Formatted watch providers
+   */
+  formatWatchProviders(watchProviders) {
+    if (!watchProviders || !watchProviders.results) return null;
+    
+    const usProviders = watchProviders.results.US;
+    if (!usProviders) return null;
+    
+    return {
+      streaming: usProviders.flatrate || [],
+      free: usProviders.ads || [],
+      rent: usProviders.rent || [],
+      buy: usProviders.buy || []
+    };
   }
 
   /**
