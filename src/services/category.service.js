@@ -118,57 +118,75 @@ class CategoryService {
   }
 
   /**
-   * Get films now streaming on OTT platforms (prioritizing recently added)
+   * Get films released directly on OTT platforms (streaming originals)
    * @param {number} page - Page number for pagination
-   * @returns {Promise<Object>} Streaming movies data
+   * @returns {Promise<Object>} OTT original movies data
    */
   async getStreamingNow(page = 1) {
     try {
-      // Get multiple batches to find recently added streaming content
-      const recentlyAddedMovies = [];
-      const olderStreamingMovies = [];
+      const ottOriginalMovies = [];
       
-      // Batch 1: Very recent releases (3-6 months ago) - likely recently added to streaming
-      const recentBatch = await this.getStreamingMoviesBatch(3, 6, 1);
+      // Get recent movies released directly on streaming platforms
+      const today = new Date();
+      const oneMonthAgo = new Date();
+      oneMonthAgo.setMonth(today.getMonth() - 1);
       
-      // Batch 2: Moderately recent (6-12 months ago) - some recently added
-      const moderateBatch = await this.getStreamingMoviesBatch(6, 12, 1);
+      const oneYearAgo = new Date();
+      oneYearAgo.setFullYear(today.getFullYear() - 1);
       
-      // Batch 3: Older movies (1-3 years) - established streaming content
-      const olderBatch = await this.getStreamingMoviesBatch(12, 36, 1);
+      // Search for OTT originals using multiple approaches
+      const searchPromises = [
+        // Netflix Originals
+        this.getOTTOriginalsBatch('Netflix', oneYearAgo, today, page),
+        // Prime Video Originals  
+        this.getOTTOriginalsBatch('Prime Video', oneYearAgo, today, page),
+        // Disney+ Originals
+        this.getOTTOriginalsBatch('Disney+', oneYearAgo, today, page),
+        // Apple TV+ Originals
+        this.getOTTOriginalsBatch('Apple TV+', oneYearAgo, today, page),
+        // HBO Max Originals
+        this.getOTTOriginalsBatch('HBO Max', oneYearAgo, today, page),
+        // Hulu Originals
+        this.getOTTOriginalsBatch('Hulu', oneYearAgo, today, page)
+      ];
       
-      // Combine and categorize results
-      const allMovies = [...recentBatch, ...moderateBatch, ...olderBatch];
+      const batchResults = await Promise.allSettled(searchPromises);
       
-      // Process each movie to get streaming info and categorize
-      for (const movie of allMovies) {
+      // Combine all successful results
+      const allMovies = [];
+      batchResults.forEach(result => {
+        if (result.status === 'fulfilled' && result.value) {
+          allMovies.push(...result.value);
+        }
+      });
+      
+      // Remove duplicates based on movie ID
+      const uniqueMovies = allMovies.filter((movie, index, self) => 
+        index === self.findIndex(m => m.id === movie.id)
+      );
+      
+      // Process each movie to verify it's an OTT original
+      for (const movie of uniqueMovies) {
         try {
           const watchProviders = await this.tmdbService.getMovieWatchProviders(movie.id);
-          const hasStreamingOptions = this.hasStreamingAvailability(watchProviders);
+          const isOTTOriginal = this.isOTTOriginal(movie, watchProviders);
           
-          if (hasStreamingOptions) {
-            const monthsSinceRelease = this.getMonthsSinceRelease(movie.release_date);
-            const streamingScore = this.calculateStreamingRecencyScore(movie, monthsSinceRelease);
+          if (isOTTOriginal) {
+            const daysSinceRelease = this.getDaysSinceRelease(movie.release_date);
             
-            const enhancedMovie = {
+            ottOriginalMovies.push({
               ...movie,
               watch_providers: this.formatWatchProviders(watchProviders),
-              streaming_available: true,
-              months_since_release: monthsSinceRelease,
-              streaming_recency_score: streamingScore,
-              likely_recently_added: streamingScore > 7
-            };
-            
-            // Categorize based on recency score
-            if (streamingScore > 7) {
-              recentlyAddedMovies.push(enhancedMovie);
-            } else {
-              olderStreamingMovies.push(enhancedMovie);
-            }
+              is_ott_original: true,
+              days_since_release: daysSinceRelease,
+              release_date_formatted: this.formatReleaseDate(movie.release_date),
+              streaming_platform: this.identifyPrimaryStreamingPlatform(watchProviders),
+              is_recent_release: daysSinceRelease <= 30 // Released in last 30 days
+            });
           }
           
-          // Limit total results
-          if (recentlyAddedMovies.length + olderStreamingMovies.length >= 20) break;
+          // Limit results to prevent too many API calls
+          if (ottOriginalMovies.length >= 20) break;
           
         } catch (error) {
           // Continue with next movie if this one fails
@@ -176,59 +194,56 @@ class CategoryService {
         }
       }
       
-      // Sort recently added by recency score (highest first)
-      recentlyAddedMovies.sort((a, b) => b.streaming_recency_score - a.streaming_recency_score);
-      
-      // Sort older movies by popularity
-      olderStreamingMovies.sort((a, b) => b.popularity - a.popularity);
-      
-      // Combine with recently added first
-      const finalResults = [...recentlyAddedMovies, ...olderStreamingMovies];
+      // Sort by release date (most recent first)
+      ottOriginalMovies.sort((a, b) => {
+        const dateA = new Date(a.release_date);
+        const dateB = new Date(b.release_date);
+        return dateB - dateA;
+      });
       
       // Enrich with taglines
-      const enrichedResults = await this.tmdbService.enrichWithTaglines(finalResults);
+      const enrichedResults = await this.tmdbService.enrichWithTaglines(ottOriginalMovies);
       
       return {
         success: true,
         data: {
           results: enrichedResults,
           total_results: enrichedResults.length,
-          recently_added_count: recentlyAddedMovies.length,
-          page: 1 // Always return page 1 for this curated list
+          recent_releases_count: enrichedResults.filter(m => m.is_recent_release).length,
+          page: 1
         },
         category: 'streaming-now',
-        description: 'Movies recently added to streaming platforms and popular streaming content',
+        description: 'Movies released directly on OTT platforms (streaming originals)',
         page
       };
     } catch (error) {
-      throw this.createCategoryError('Failed to fetch streaming movies', error);
+      throw this.createCategoryError('Failed to fetch OTT original movies', error);
     }
   }
 
   /**
-   * Get a batch of movies for streaming analysis
-   * @param {number} minMonthsAgo - Minimum months since release
-   * @param {number} maxMonthsAgo - Maximum months since release
+   * Get OTT original movies for a specific platform
+   * @param {string} platform - Platform name (Netflix, Prime Video, etc.)
+   * @param {Date} startDate - Start date for search
+   * @param {Date} endDate - End date for search
    * @param {number} page - Page number
    * @returns {Promise<Array>} Array of movies
    */
-  async getStreamingMoviesBatch(minMonthsAgo, maxMonthsAgo, page = 1) {
-    const today = new Date();
-    const minDate = new Date();
-    minDate.setMonth(today.getMonth() - maxMonthsAgo);
-    
-    const maxDate = new Date();
-    maxDate.setMonth(today.getMonth() - minMonthsAgo);
-    
+  async getOTTOriginalsBatch(platform, startDate, endDate, page = 1) {
     const params = {
-      sort_by: 'popularity.desc',
-      'release_date.gte': this.formatDateForAPI(minDate),
-      'release_date.lte': this.formatDateForAPI(maxDate),
-      'vote_average.gte': 5.5,
-      'vote_count.gte': 100,
-      with_watch_monetization_types: 'flatrate|ads',
+      sort_by: 'release_date.desc',
+      'release_date.gte': this.formatDateForAPI(startDate),
+      'release_date.lte': this.formatDateForAPI(endDate),
+      'vote_count.gte': 50, // Lower threshold for newer releases
+      with_watch_monetization_types: 'flatrate',
       page
     };
+    
+    // Add platform-specific company filters
+    const companyIds = this.getStreamingCompanyIds(platform);
+    if (companyIds.length > 0) {
+      params.with_companies = companyIds.join('|');
+    }
     
     try {
       const response = await this.tmdbService.discoverMovies(params);
@@ -239,41 +254,130 @@ class CategoryService {
   }
 
   /**
-   * Calculate streaming recency score (higher = more likely recently added)
-   * @param {Object} movie - Movie object
-   * @param {number} monthsSinceRelease - Months since theatrical release
-   * @returns {number} Score from 1-10
+   * Get company IDs for streaming platforms
+   * @param {string} platform - Platform name
+   * @returns {Array} Array of company IDs
    */
-  calculateStreamingRecencyScore(movie, monthsSinceRelease) {
-    let score = 5; // Base score
+  getStreamingCompanyIds(platform) {
+    const companyMap = {
+      'Netflix': [2, 4640], // Netflix
+      'Prime Video': [1024, 11073], // Amazon Studios, Amazon Prime Video
+      'Disney+': [2, 3166, 6125], // Walt Disney Pictures, Disney+
+      'Apple TV+': [11481], // Apple Original Films
+      'HBO Max': [174, 3268], // Warner Bros, HBO
+      'Hulu': [2739] // Hulu
+    };
     
-    // Recent releases are more likely to be recently added to streaming
-    if (monthsSinceRelease <= 6) {
-      score += 3;
-    } else if (monthsSinceRelease <= 12) {
-      score += 2;
-    } else if (monthsSinceRelease <= 24) {
-      score += 1;
+    return companyMap[platform] || [];
+  }
+
+  /**
+   * Check if a movie is an OTT original (not theatrical release)
+   * @param {Object} movie - Movie object
+   * @param {Object} watchProviders - Watch providers data
+   * @returns {boolean} True if it's an OTT original
+   */
+  isOTTOriginal(movie, watchProviders) {
+    // Check if movie has limited theatrical release or direct-to-streaming indicators
+    
+    // 1. Low vote count might indicate limited release
+    if (movie.vote_count < 500) {
+      return true;
     }
     
-    // High popularity suggests recent addition or trending
-    if (movie.popularity > 50) {
-      score += 2;
-    } else if (movie.popularity > 25) {
-      score += 1;
+    // 2. Check if only available on streaming (not in theaters)
+    if (watchProviders && watchProviders.results) {
+      const usProviders = watchProviders.results.US;
+      if (usProviders) {
+        // Has streaming but no theatrical indicators
+        const hasStreaming = !!(usProviders.flatrate || usProviders.ads);
+        const hasRental = !!(usProviders.rent || usProviders.buy);
+        
+        // If only streaming available (no rental/buy), likely original
+        if (hasStreaming && !hasRental) {
+          return true;
+        }
+      }
     }
     
-    // High vote count suggests recent attention
-    if (movie.vote_count > 1000) {
-      score += 1;
+    // 3. Check production companies for streaming originals
+    if (movie.production_companies) {
+      const streamingCompanies = [
+        'Netflix', 'Amazon Studios', 'Apple Original Films', 
+        'Disney+', 'HBO Max', 'Hulu Originals'
+      ];
+      
+      const hasStreamingCompany = movie.production_companies.some(company =>
+        streamingCompanies.some(streaming => 
+          company.name.toLowerCase().includes(streaming.toLowerCase())
+        )
+      );
+      
+      if (hasStreamingCompany) {
+        return true;
+      }
     }
     
-    // Recent high ratings suggest current relevance
-    if (movie.vote_average >= 7.5) {
-      score += 1;
+    // 4. Recent release with high streaming availability
+    const daysSinceRelease = this.getDaysSinceRelease(movie.release_date);
+    if (daysSinceRelease <= 90 && this.hasStreamingAvailability(watchProviders)) {
+      return true;
     }
     
-    return Math.min(score, 10); // Cap at 10
+    return false;
+  }
+
+  /**
+   * Identify the primary streaming platform for a movie
+   * @param {Object} watchProviders - Watch providers data
+   * @returns {string} Primary platform name
+   */
+  identifyPrimaryStreamingPlatform(watchProviders) {
+    if (!watchProviders || !watchProviders.results) return 'Unknown';
+    
+    const usProviders = watchProviders.results.US;
+    if (!usProviders || !usProviders.flatrate) return 'Unknown';
+    
+    const platformMap = {
+      8: 'Netflix',
+      9: 'Amazon Prime Video',
+      337: 'Disney+',
+      350: 'Apple TV+',
+      384: 'HBO Max',
+      15: 'Hulu'
+    };
+    
+    // Return the first recognized platform
+    for (const provider of usProviders.flatrate) {
+      if (platformMap[provider.provider_id]) {
+        return platformMap[provider.provider_id];
+      }
+    }
+    
+    return usProviders.flatrate[0]?.provider_name || 'Unknown';
+  }
+
+  /**
+   * Calculate days since release
+   * @param {string} dateString - ISO date string
+   * @returns {number} Number of days since release
+   */
+  getDaysSinceRelease(dateString) {
+    if (!dateString) return null;
+    
+    try {
+      const releaseDate = new Date(dateString);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      releaseDate.setHours(0, 0, 0, 0);
+      
+      const timeDiff = today.getTime() - releaseDate.getTime();
+      const daysDiff = Math.floor(timeDiff / (1000 * 3600 * 24));
+      
+      return daysDiff;
+    } catch (error) {
+      return null;
+    }
   }
 
   /**
