@@ -20,12 +20,12 @@ class CategoryService {
   async getTrendingMovies(page = 1) {
     try {
       const response = await this.tmdbService.getTrending('movie', 'day');
-      
+
       // Enrich with taglines
       if (response.results) {
         response.results = await this.tmdbService.enrichWithTaglines(response.results);
       }
-      
+
       return {
         success: true,
         data: response,
@@ -45,12 +45,12 @@ class CategoryService {
   async getHotTVShows(page = 1) {
     try {
       const response = await this.tmdbService.getTrending('tv', 'day');
-      
+
       // Enrich with taglines
       if (response.results) {
         response.results = await this.tmdbService.enrichWithTaglines(response.results);
       }
-      
+
       return {
         success: true,
         data: response,
@@ -70,23 +70,23 @@ class CategoryService {
   async getAnticipatedMovies(page = 1) {
     try {
       const response = await this.tmdbService.getUpcoming(page);
-      
+
       // Filter out movies that have already been released
       const today = new Date();
       today.setHours(0, 0, 0, 0); // Reset time to start of day
-      
+
       if (response.results) {
         // Filter movies to only include those with future release dates
         response.results = response.results.filter(movie => {
           if (!movie.release_date) return false; // Exclude movies without release dates
-          
+
           const releaseDate = new Date(movie.release_date);
           return releaseDate >= today; // Only include movies releasing today or in the future
         });
-        
+
         // Enrich with taglines
         response.results = await this.tmdbService.enrichWithTaglines(response.results);
-        
+
         // Add formatted release dates and upcoming status
         response.results = response.results.map(movie => ({
           ...movie,
@@ -94,18 +94,18 @@ class CategoryService {
           is_upcoming: true,
           days_until_release: this.getDaysUntilRelease(movie.release_date)
         }));
-        
+
         // Sort by release date (soonest first)
         response.results.sort((a, b) => {
           const dateA = new Date(a.release_date);
           const dateB = new Date(b.release_date);
           return dateA - dateB;
         });
-        
+
         // Update total results count after filtering
         response.total_results = response.results.length;
       }
-      
+
       return {
         success: true,
         data: response,
@@ -125,33 +125,40 @@ class CategoryService {
   async getStreamingNow(page = 1) {
     try {
       const ottOriginalMovies = [];
-      
+
       // Get recent movies released directly on streaming platforms
       const today = new Date();
-      const oneMonthAgo = new Date();
-      oneMonthAgo.setMonth(today.getMonth() - 1);
-      
-      const oneYearAgo = new Date();
-      oneYearAgo.setFullYear(today.getFullYear() - 1);
-      
+      const oneWeekAgo = new Date();
+      oneWeekAgo.setDate(today.getDate() - 7);
+
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(today.getMonth() - 6);
+
       // Search for OTT originals using multiple approaches
-      const searchPromises = [
-        // Netflix Originals
-        this.getOTTOriginalsBatch('Netflix', oneYearAgo, today, page),
-        // Prime Video Originals  
-        this.getOTTOriginalsBatch('Prime Video', oneYearAgo, today, page),
-        // Disney+ Originals
-        this.getOTTOriginalsBatch('Disney+', oneYearAgo, today, page),
-        // Apple TV+ Originals
-        this.getOTTOriginalsBatch('Apple TV+', oneYearAgo, today, page),
-        // HBO Max Originals
-        this.getOTTOriginalsBatch('HBO Max', oneYearAgo, today, page),
-        // Hulu Originals
-        this.getOTTOriginalsBatch('Hulu', oneYearAgo, today, page)
+      // Priority 1: Very recent releases (last week)
+      const recentSearchPromises = [
+        this.getOTTOriginalsBatch('Netflix', oneWeekAgo, today, 1),
+        this.getOTTOriginalsBatch('Prime Video', oneWeekAgo, today, 1),
+        this.getOTTOriginalsBatch('Disney+', oneWeekAgo, today, 1),
+        this.getOTTOriginalsBatch('Apple TV+', oneWeekAgo, today, 1),
+        this.getOTTOriginalsBatch('HBO Max', oneWeekAgo, today, 1),
+        this.getOTTOriginalsBatch('Hulu', oneWeekAgo, today, 1)
       ];
-      
+
+      // Priority 2: Recent releases (last 6 months)
+      const olderSearchPromises = [
+        this.getOTTOriginalsBatch('Netflix', sixMonthsAgo, oneWeekAgo, 1),
+        this.getOTTOriginalsBatch('Prime Video', sixMonthsAgo, oneWeekAgo, 1),
+        this.getOTTOriginalsBatch('Disney+', sixMonthsAgo, oneWeekAgo, 1),
+        this.getOTTOriginalsBatch('Apple TV+', sixMonthsAgo, oneWeekAgo, 1),
+        this.getOTTOriginalsBatch('HBO Max', sixMonthsAgo, oneWeekAgo, 1),
+        this.getOTTOriginalsBatch('Hulu', sixMonthsAgo, oneWeekAgo, 1)
+      ];
+
+      const searchPromises = [...recentSearchPromises, ...olderSearchPromises];
+
       const batchResults = await Promise.allSettled(searchPromises);
-      
+
       // Combine all successful results
       const allMovies = [];
       batchResults.forEach(result => {
@@ -159,21 +166,21 @@ class CategoryService {
           allMovies.push(...result.value);
         }
       });
-      
+
       // Remove duplicates based on movie ID
-      const uniqueMovies = allMovies.filter((movie, index, self) => 
+      const uniqueMovies = allMovies.filter((movie, index, self) =>
         index === self.findIndex(m => m.id === movie.id)
       );
-      
+
       // Process each movie to verify it's an OTT original
       for (const movie of uniqueMovies) {
         try {
           const watchProviders = await this.tmdbService.getMovieWatchProviders(movie.id);
           const isOTTOriginal = this.isOTTOriginal(movie, watchProviders);
-          
+
           if (isOTTOriginal) {
             const daysSinceRelease = this.getDaysSinceRelease(movie.release_date);
-            
+
             ottOriginalMovies.push({
               ...movie,
               watch_providers: this.formatWatchProviders(watchProviders),
@@ -184,26 +191,41 @@ class CategoryService {
               is_recent_release: daysSinceRelease <= 30 // Released in last 30 days
             });
           }
-          
+
           // Limit results to prevent too many API calls
           if (ottOriginalMovies.length >= 20) break;
-          
+
         } catch (error) {
           // Continue with next movie if this one fails
           continue;
         }
       }
-      
-      // Sort by release date (most recent first)
+
+      // Sort by latest OTT release first (most recent releases at the top)
       ottOriginalMovies.sort((a, b) => {
-        const dateA = new Date(a.release_date);
-        const dateB = new Date(b.release_date);
-        return dateB - dateA;
+        // Primary sort: by days since release (newest first)
+        const daysDiffA = a.days_since_release || 999999;
+        const daysDiffB = b.days_since_release || 999999;
+
+        if (daysDiffA !== daysDiffB) {
+          return daysDiffA - daysDiffB; // Smaller days = more recent = higher priority
+        }
+
+        // Secondary sort: by release date (most recent first)
+        const dateA = new Date(a.release_date || '1900-01-01');
+        const dateB = new Date(b.release_date || '1900-01-01');
+
+        if (dateA.getTime() !== dateB.getTime()) {
+          return dateB - dateA; // More recent date = higher priority
+        }
+
+        // Tertiary sort: by popularity (higher popularity first)
+        return (b.popularity || 0) - (a.popularity || 0);
       });
-      
+
       // Enrich with taglines
       const enrichedResults = await this.tmdbService.enrichWithTaglines(ottOriginalMovies);
-      
+
       return {
         success: true,
         data: {
@@ -238,13 +260,13 @@ class CategoryService {
       with_watch_monetization_types: 'flatrate',
       page
     };
-    
+
     // Add platform-specific company filters
     const companyIds = this.getStreamingCompanyIds(platform);
     if (companyIds.length > 0) {
       params.with_companies = companyIds.join('|');
     }
-    
+
     try {
       const response = await this.tmdbService.discoverMovies(params);
       return response.results || [];
@@ -267,7 +289,7 @@ class CategoryService {
       'HBO Max': [174, 3268], // Warner Bros, HBO
       'Hulu': [2739] // Hulu
     };
-    
+
     return companyMap[platform] || [];
   }
 
@@ -279,12 +301,12 @@ class CategoryService {
    */
   isOTTOriginal(movie, watchProviders) {
     // Check if movie has limited theatrical release or direct-to-streaming indicators
-    
+
     // 1. Low vote count might indicate limited release
     if (movie.vote_count < 500) {
       return true;
     }
-    
+
     // 2. Check if only available on streaming (not in theaters)
     if (watchProviders && watchProviders.results) {
       const usProviders = watchProviders.results.US;
@@ -292,38 +314,38 @@ class CategoryService {
         // Has streaming but no theatrical indicators
         const hasStreaming = !!(usProviders.flatrate || usProviders.ads);
         const hasRental = !!(usProviders.rent || usProviders.buy);
-        
+
         // If only streaming available (no rental/buy), likely original
         if (hasStreaming && !hasRental) {
           return true;
         }
       }
     }
-    
+
     // 3. Check production companies for streaming originals
     if (movie.production_companies) {
       const streamingCompanies = [
-        'Netflix', 'Amazon Studios', 'Apple Original Films', 
+        'Netflix', 'Amazon Studios', 'Apple Original Films',
         'Disney+', 'HBO Max', 'Hulu Originals'
       ];
-      
+
       const hasStreamingCompany = movie.production_companies.some(company =>
-        streamingCompanies.some(streaming => 
+        streamingCompanies.some(streaming =>
           company.name.toLowerCase().includes(streaming.toLowerCase())
         )
       );
-      
+
       if (hasStreamingCompany) {
         return true;
       }
     }
-    
+
     // 4. Recent release with high streaming availability
     const daysSinceRelease = this.getDaysSinceRelease(movie.release_date);
     if (daysSinceRelease <= 90 && this.hasStreamingAvailability(watchProviders)) {
       return true;
     }
-    
+
     return false;
   }
 
@@ -334,10 +356,10 @@ class CategoryService {
    */
   identifyPrimaryStreamingPlatform(watchProviders) {
     if (!watchProviders || !watchProviders.results) return 'Unknown';
-    
+
     const usProviders = watchProviders.results.US;
     if (!usProviders || !usProviders.flatrate) return 'Unknown';
-    
+
     const platformMap = {
       8: 'Netflix',
       9: 'Amazon Prime Video',
@@ -346,14 +368,14 @@ class CategoryService {
       384: 'HBO Max',
       15: 'Hulu'
     };
-    
+
     // Return the first recognized platform
     for (const provider of usProviders.flatrate) {
       if (platformMap[provider.provider_id]) {
         return platformMap[provider.provider_id];
       }
     }
-    
+
     return usProviders.flatrate[0]?.provider_name || 'Unknown';
   }
 
@@ -364,16 +386,16 @@ class CategoryService {
    */
   getDaysSinceRelease(dateString) {
     if (!dateString) return null;
-    
+
     try {
       const releaseDate = new Date(dateString);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       releaseDate.setHours(0, 0, 0, 0);
-      
+
       const timeDiff = today.getTime() - releaseDate.getTime();
       const daysDiff = Math.floor(timeDiff / (1000 * 3600 * 24));
-      
+
       return daysDiff;
     } catch (error) {
       return null;
@@ -402,7 +424,7 @@ class CategoryService {
       } else {
         response = await this.tmdbService.discoverMovies(params);
       }
-      
+
       // Enrich with taglines
       if (response.results) {
         response.results = await this.tmdbService.enrichWithTaglines(response.results);
@@ -442,7 +464,7 @@ class CategoryService {
       } else {
         response = await this.tmdbService.discoverMovies(params);
       }
-      
+
       // Enrich with taglines
       if (response.results) {
         response.results = await this.tmdbService.enrichWithTaglines(response.results);
@@ -475,7 +497,7 @@ class CategoryService {
     try {
       const params = { ...convertToTMDBParams(mapping), page };
       const response = await this.tmdbService.discoverMovies(params);
-      
+
       // Enrich with taglines
       if (response.results) {
         response.results = await this.tmdbService.enrichWithTaglines(response.results);
@@ -508,7 +530,7 @@ class CategoryService {
     try {
       const params = { ...convertToTMDBParams(mapping), page };
       const response = await this.tmdbService.discoverTV(params);
-      
+
       // Enrich with taglines
       if (response.results) {
         response.results = await this.tmdbService.enrichWithTaglines(response.results);
@@ -548,7 +570,7 @@ class CategoryService {
       } else {
         response = await this.tmdbService.discoverMovies(params);
       }
-      
+
       // Enrich with taglines
       if (response.results) {
         response.results = await this.tmdbService.enrichWithTaglines(response.results);
@@ -574,12 +596,12 @@ class CategoryService {
   async getUpcomingMovies(page = 1) {
     try {
       const response = await this.tmdbService.getUpcoming(page);
-      
+
       // Enrich with taglines
       if (response.results) {
         response.results = await this.tmdbService.enrichWithTaglines(response.results);
       }
-      
+
       // Transform data with proper date formatting
       const transformedData = {
         ...response,
@@ -621,12 +643,12 @@ class CategoryService {
       };
 
       const response = await this.tmdbService.discoverTV(params);
-      
+
       // Enrich with taglines
       if (response.results) {
         response.results = await this.tmdbService.enrichWithTaglines(response.results);
       }
-      
+
       // Transform data with proper date formatting
       const transformedData = {
         ...response,
@@ -698,7 +720,7 @@ class CategoryService {
    */
   formatReleaseDate(dateString) {
     if (!dateString) return 'TBA';
-    
+
     try {
       const date = new Date(dateString);
       // Check if the date is valid
@@ -731,7 +753,7 @@ class CategoryService {
    */
   isUpcoming(dateString) {
     if (!dateString) return false;
-    
+
     try {
       const date = new Date(dateString);
       const today = new Date();
@@ -749,16 +771,16 @@ class CategoryService {
    */
   getDaysUntilRelease(dateString) {
     if (!dateString) return null;
-    
+
     try {
       const releaseDate = new Date(dateString);
       const today = new Date();
       today.setHours(0, 0, 0, 0); // Reset time to start of day
       releaseDate.setHours(0, 0, 0, 0); // Reset time to start of day
-      
+
       const timeDiff = releaseDate.getTime() - today.getTime();
       const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
-      
+
       return daysDiff;
     } catch (error) {
       return null;
@@ -772,14 +794,14 @@ class CategoryService {
    */
   getMonthsSinceRelease(dateString) {
     if (!dateString) return null;
-    
+
     try {
       const releaseDate = new Date(dateString);
       const today = new Date();
-      
+
       const yearDiff = today.getFullYear() - releaseDate.getFullYear();
       const monthDiff = today.getMonth() - releaseDate.getMonth();
-      
+
       return yearDiff * 12 + monthDiff;
     } catch (error) {
       return null;
@@ -793,11 +815,11 @@ class CategoryService {
    */
   hasStreamingAvailability(watchProviders) {
     if (!watchProviders || !watchProviders.results) return false;
-    
+
     // Check US market (you can modify this for other regions)
     const usProviders = watchProviders.results.US;
     if (!usProviders) return false;
-    
+
     // Check for flatrate (subscription) or ads (free with ads) options
     return !!(usProviders.flatrate || usProviders.ads);
   }
@@ -809,10 +831,10 @@ class CategoryService {
    */
   formatWatchProviders(watchProviders) {
     if (!watchProviders || !watchProviders.results) return null;
-    
+
     const usProviders = watchProviders.results.US;
     if (!usProviders) return null;
-    
+
     return {
       streaming: usProviders.flatrate || [],
       free: usProviders.ads || [],
