@@ -98,7 +98,7 @@ app.get('/health', (req, res) => {
 app.use('/api/search', searchRateLimit, searchRouter);
 app.use('/api/movie', contentRateLimit);
 app.use('/api/tv', contentRateLimit);
-app.use('/api', categoriesRouter);
+app.use('/api/categories', categoriesRouter);
 app.use('/api/upcoming', upcomingRouter);
 app.use('/api', contentRouter);
 
@@ -115,9 +115,11 @@ if (require.main === module) {
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log('Available endpoints:');
     console.log('  GET /health - Health check');
-    console.log('  GET /api - Categories overview');
-    console.log('  GET /api/trending/movies - Trending movies');
-    console.log('  GET /api/trending/tv - Hot TV shows');
+    console.log('  GET /api/categories - Categories overview');
+    console.log('  GET /api/categories/trending/movies - Trending movies');
+    console.log('  GET /api/categories/trending/tv - Hot TV shows');
+    console.log('  GET /api/categories/upcoming/movies - Anticipated movies');
+    console.log('  GET /api/categories/streaming/now - Films now streaming');
     console.log('  GET /api/upcoming - Combined upcoming content');
     console.log('  GET /api/upcoming/movies - Upcoming movies');
     console.log('  GET /api/upcoming/tv - Upcoming TV shows');
