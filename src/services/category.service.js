@@ -134,26 +134,23 @@ class CategoryService {
       const sixMonthsAgo = new Date();
       sixMonthsAgo.setMonth(today.getMonth() - 6);
 
-      // Search for OTT originals using multiple approaches
-      // Priority 1: Very recent releases (last week)
-      const recentSearchPromises = [
-        this.getOTTOriginalsBatch('Netflix', oneWeekAgo, today, 1),
-        this.getOTTOriginalsBatch('Prime Video', oneWeekAgo, today, 1),
-        this.getOTTOriginalsBatch('Disney+', oneWeekAgo, today, 1),
-        this.getOTTOriginalsBatch('Apple TV+', oneWeekAgo, today, 1),
-        this.getOTTOriginalsBatch('HBO Max', oneWeekAgo, today, 1),
-        this.getOTTOriginalsBatch('Hulu', oneWeekAgo, today, 1)
+      // Search for OTT originals from ALL streaming platforms
+      const allOTTPlatforms = [
+        'Netflix', 'Prime Video', 'Disney+', 'Apple TV+', 'HBO Max', 'Hulu',
+        'Paramount+', 'Peacock', 'Showtime', 'Starz', 'Crunchyroll', 'Funimation',
+        'YouTube Premium', 'Tubi', 'Pluto TV', 'Roku Channel', 'IMDb TV',
+        'Vudu', 'Crackle', 'Plex', 'Kanopy', 'Hoopla'
       ];
 
-      // Priority 2: Recent releases (last 6 months)
-      const olderSearchPromises = [
-        this.getOTTOriginalsBatch('Netflix', sixMonthsAgo, oneWeekAgo, 1),
-        this.getOTTOriginalsBatch('Prime Video', sixMonthsAgo, oneWeekAgo, 1),
-        this.getOTTOriginalsBatch('Disney+', sixMonthsAgo, oneWeekAgo, 1),
-        this.getOTTOriginalsBatch('Apple TV+', sixMonthsAgo, oneWeekAgo, 1),
-        this.getOTTOriginalsBatch('HBO Max', sixMonthsAgo, oneWeekAgo, 1),
-        this.getOTTOriginalsBatch('Hulu', sixMonthsAgo, oneWeekAgo, 1)
-      ];
+      // Priority 1: Very recent releases (last week) from ALL platforms
+      const recentSearchPromises = allOTTPlatforms.map(platform =>
+        this.getOTTOriginalsBatch(platform, oneWeekAgo, today, 1)
+      );
+
+      // Priority 2: Recent releases (last 6 months) from ALL platforms
+      const olderSearchPromises = allOTTPlatforms.map(platform =>
+        this.getOTTOriginalsBatch(platform, sixMonthsAgo, oneWeekAgo, 1)
+      );
 
       const searchPromises = [...recentSearchPromises, ...olderSearchPromises];
 
@@ -287,7 +284,23 @@ class CategoryService {
       'Disney+': [2, 3166, 6125], // Walt Disney Pictures, Disney+
       'Apple TV+': [11481], // Apple Original Films
       'HBO Max': [174, 3268], // Warner Bros, HBO
-      'Hulu': [2739] // Hulu
+      'Hulu': [2739], // Hulu
+      'Paramount+': [4, 491], // Paramount Pictures, MTV Entertainment Studios
+      'Peacock': [1778], // NBCUniversal
+      'Showtime': [2605], // Showtime Networks
+      'Starz': [432], // Starz Entertainment
+      'Crunchyroll': [4906], // Crunchyroll
+      'Funimation': [1957], // Funimation
+      'YouTube Premium': [11073], // YouTube Originals
+      'Tubi': [11073], // Tubi
+      'Pluto TV': [11073], // Pluto TV
+      'Roku Channel': [11073], // Roku
+      'IMDb TV': [1024], // Amazon (IMDb TV)
+      'Vudu': [7505], // Vudu
+      'Crackle': [11073], // Crackle
+      'Plex': [11073], // Plex
+      'Kanopy': [11073], // Kanopy
+      'Hoopla': [11073] // Hoopla
     };
 
     return companyMap[platform] || [];
@@ -366,7 +379,23 @@ class CategoryService {
       337: 'Disney+',
       350: 'Apple TV+',
       384: 'HBO Max',
-      15: 'Hulu'
+      15: 'Hulu',
+      531: 'Paramount+',
+      386: 'Peacock',
+      37: 'Showtime',
+      43: 'Starz',
+      283: 'Crunchyroll',
+      269: 'Funimation',
+      188: 'YouTube Premium',
+      583: 'Tubi',
+      300: 'Pluto TV',
+      207: 'Roku Channel',
+      613: 'IMDb TV',
+      7: 'Vudu',
+      12: 'Crackle',
+      538: 'Plex',
+      191: 'Kanopy',
+      212: 'Hoopla'
     };
 
     // Return the first recognized platform
