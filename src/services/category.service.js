@@ -71,9 +71,39 @@ class CategoryService {
     try {
       const response = await this.tmdbService.getUpcoming(page);
       
-      // Enrich with taglines
+      // Filter out movies that have already been released
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Reset time to start of day
+      
       if (response.results) {
+        // Filter movies to only include those with future release dates
+        response.results = response.results.filter(movie => {
+          if (!movie.release_date) return false; // Exclude movies without release dates
+          
+          const releaseDate = new Date(movie.release_date);
+          return releaseDate >= today; // Only include movies releasing today or in the future
+        });
+        
+        // Enrich with taglines
         response.results = await this.tmdbService.enrichWithTaglines(response.results);
+        
+        // Add formatted release dates and upcoming status
+        response.results = response.results.map(movie => ({
+          ...movie,
+          release_date_formatted: this.formatReleaseDate(movie.release_date),
+          is_upcoming: true,
+          days_until_release: this.getDaysUntilRelease(movie.release_date)
+        }));
+        
+        // Sort by release date (soonest first)
+        response.results.sort((a, b) => {
+          const dateA = new Date(a.release_date);
+          const dateB = new Date(b.release_date);
+          return dateA - dateB;
+        });
+        
+        // Update total results count after filtering
+        response.total_results = response.results.length;
       }
       
       return {
@@ -478,6 +508,29 @@ class CategoryService {
       return date >= today;
     } catch (error) {
       return false;
+    }
+  }
+
+  /**
+   * Calculate days until release
+   * @param {string} dateString - ISO date string
+   * @returns {number} Number of days until release (0 if today, negative if past)
+   */
+  getDaysUntilRelease(dateString) {
+    if (!dateString) return null;
+    
+    try {
+      const releaseDate = new Date(dateString);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Reset time to start of day
+      releaseDate.setHours(0, 0, 0, 0); // Reset time to start of day
+      
+      const timeDiff = releaseDate.getTime() - today.getTime();
+      const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
+      
+      return daysDiff;
+    } catch (error) {
+      return null;
     }
   }
 
