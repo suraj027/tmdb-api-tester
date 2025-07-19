@@ -13,23 +13,47 @@ class CategoryService {
   }
 
   /**
-   * Get trending movies
+   * Get trending movies (currently trending right now)
    * @param {number} page - Page number for pagination
    * @returns {Promise<Object>} Trending movies data
    */
   async getTrendingMovies(page = 1) {
     try {
-      const response = await this.tmdbService.getTrending('movie', 'day');
+      // Get daily trending movies (most current trending data)
+      const dailyResponse = await this.tmdbService.getTrending('movie', 'day');
 
-      // Enrich with taglines
+      let response = dailyResponse;
+
+      // If daily trending has insufficient results, fallback to weekly
+      if (!dailyResponse.results || dailyResponse.results.length < 10) {
+        const weeklyResponse = await this.tmdbService.getTrending('movie', 'week');
+        response = weeklyResponse;
+        response.trending_period = 'week';
+        response.fallback_used = true;
+      } else {
+        response.trending_period = 'day';
+        response.fallback_used = false;
+      }
+
+      // Enrich with taglines and additional trending data
       if (response.results) {
         response.results = await this.tmdbService.enrichWithTaglines(response.results);
+
+        // Add trending metadata to each movie
+        response.results = response.results.map((movie, index) => ({
+          ...movie,
+          trending_rank: index + 1,
+          trending_score: this.calculateTrendingScore(movie, index),
+          is_currently_trending: true,
+          trending_period: response.trending_period
+        }));
       }
 
       return {
         success: true,
         data: response,
         category: 'trending-movies',
+        description: `Movies trending ${response.trending_period === 'day' ? 'today' : 'this week'}`,
         page
       };
     } catch (error) {
@@ -999,6 +1023,44 @@ class CategoryService {
       rent: usProviders.rent || [],
       buy: usProviders.buy || []
     };
+  }
+
+  /**
+   * Calculate trending score based on position and movie metrics
+   * @param {Object} movie - Movie object
+   * @param {number} rank - Position in trending list (0-based)
+   * @returns {number} Trending score from 1-100
+   */
+  calculateTrendingScore(movie, rank) {
+    let score = 100 - (rank * 5); // Base score decreases by position
+
+    // Boost for high popularity
+    if (movie.popularity > 100) {
+      score += 10;
+    } else if (movie.popularity > 50) {
+      score += 5;
+    }
+
+    // Boost for high ratings with sufficient votes
+    if (movie.vote_average >= 8.0 && movie.vote_count > 1000) {
+      score += 10;
+    } else if (movie.vote_average >= 7.0 && movie.vote_count > 500) {
+      score += 5;
+    }
+
+    // Boost for recent releases (more likely to be trending due to newness)
+    if (movie.release_date) {
+      const daysSinceRelease = this.getDaysSinceRelease(movie.release_date);
+      if (daysSinceRelease <= 30) {
+        score += 15; // Very recent
+      } else if (daysSinceRelease <= 90) {
+        score += 10; // Recent
+      } else if (daysSinceRelease <= 180) {
+        score += 5; // Moderately recent
+      }
+    }
+
+    return Math.max(Math.min(score, 100), 1); // Keep between 1-100
   }
 
   /**
