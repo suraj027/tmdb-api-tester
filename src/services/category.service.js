@@ -13,51 +13,93 @@ class CategoryService {
   }
 
   /**
-   * Get trending movies (currently trending right now)
+   * Get trending movies (all trending movies of current week)
    * @param {number} page - Page number for pagination
    * @returns {Promise<Object>} Trending movies data
    */
   async getTrendingMovies(page = 1) {
     try {
-      // Get daily trending movies (most current trending data)
-      const dailyResponse = await this.tmdbService.getTrending('movie', 'day');
+      // Fetch multiple pages of weekly trending movies to get as many as possible
+      const maxPages = 5; // Fetch up to 5 pages (up to 100 movies)
+      const allTrendingMovies = [];
 
-      let response = dailyResponse;
-
-      // If daily trending has insufficient results, fallback to weekly
-      if (!dailyResponse.results || dailyResponse.results.length < 10) {
-        const weeklyResponse = await this.tmdbService.getTrending('movie', 'week');
-        response = weeklyResponse;
-        response.trending_period = 'week';
-        response.fallback_used = true;
-      } else {
-        response.trending_period = 'day';
-        response.fallback_used = false;
+      // Fetch multiple pages concurrently for better performance
+      const pagePromises = [];
+      for (let i = 1; i <= maxPages; i++) {
+        pagePromises.push(this.fetchTrendingMoviesPage(i));
       }
+
+      const pageResults = await Promise.allSettled(pagePromises);
+
+      // Combine all successful results
+      let totalResults = 0;
+      let totalPages = 1;
+
+      pageResults.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value) {
+          const pageData = result.value;
+          if (pageData.results && pageData.results.length > 0) {
+            allTrendingMovies.push(...pageData.results);
+            totalResults = pageData.total_results || totalResults;
+            totalPages = pageData.total_pages || totalPages;
+          }
+        }
+      });
+
+      // Remove duplicates based on movie ID (in case of overlap)
+      const uniqueMovies = allTrendingMovies.filter((movie, index, self) =>
+        index === self.findIndex(m => m.id === movie.id)
+      );
+
+      // Sort by popularity to maintain trending order
+      uniqueMovies.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
 
       // Enrich with taglines and additional trending data
-      if (response.results) {
-        response.results = await this.tmdbService.enrichWithTaglines(response.results);
+      const enrichedMovies = await this.tmdbService.enrichWithTaglines(uniqueMovies);
 
-        // Add trending metadata to each movie
-        response.results = response.results.map((movie, index) => ({
-          ...movie,
-          trending_rank: index + 1,
-          trending_score: this.calculateTrendingScore(movie, index),
-          is_currently_trending: true,
-          trending_period: response.trending_period
-        }));
-      }
+      // Add trending metadata to each movie
+      const finalMovies = enrichedMovies.map((movie, index) => ({
+        ...movie,
+        trending_rank: index + 1,
+        trending_score: this.calculateTrendingScore(movie, index),
+        is_currently_trending: true,
+        trending_period: 'week',
+        week_trending_position: index + 1
+      }));
 
       return {
         success: true,
-        data: response,
+        data: {
+          results: finalMovies,
+          total_results: finalMovies.length,
+          total_pages: 1, // Return as single consolidated page
+          page: 1,
+          trending_period: 'week',
+          movies_fetched: finalMovies.length,
+          pages_fetched: pageResults.filter(r => r.status === 'fulfilled').length
+        },
         category: 'trending-movies',
-        description: `Movies trending ${response.trending_period === 'day' ? 'today' : 'this week'}`,
-        page
+        description: `All trending movies of this current week (${finalMovies.length} movies)`,
+        page: 1
       };
     } catch (error) {
       throw this.createCategoryError('Failed to fetch trending movies', error);
+    }
+  }
+
+  /**
+   * Fetch a single page of trending movies
+   * @param {number} page - Page number
+   * @returns {Promise<Object>} Page of trending movies
+   */
+  async fetchTrendingMoviesPage(page) {
+    try {
+      // Use weekly trending to get current week's trending movies
+      const response = await this.tmdbService.makeRequest(`/trending/movie/week`, { page });
+      return response;
+    } catch (error) {
+      console.warn(`Failed to fetch trending movies page ${page}:`, error.message);
+      return null;
     }
   }
 
